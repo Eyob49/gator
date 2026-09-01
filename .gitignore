@@ -1,0 +1,4 @@
+gator
+*.exe
+.DS_Store
+.env
