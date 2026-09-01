@@ -52,7 +52,7 @@ func write(cfg *Config) error {
 	return os.WriteFile(filePath, data, 0o644)
 }
 
-func SetUser(username string) error {
+func (c *Config) SetUser(username string) error {
 	config, err := Read()
 	if err != nil {
 		return err
