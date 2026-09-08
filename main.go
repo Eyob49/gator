@@ -190,6 +190,40 @@ func handlerFetchFeed(s *state, cmd command) error {
 	return nil
 }
 
+func handlerAddFeed(s *state, cmd command) error {
+	if len(cmd.args) < 2 {
+		return fmt.Errorf("feed name and URL are required")
+	}
+
+	currentUser, err := s.db.GetUser(context.Background(), s.config.Username)
+	if err != nil {
+		return fmt.Errorf("failed to get user: %v", err)
+	}
+
+	id := uuid.New()
+	created_at := time.Now()
+	updated_at := time.Now()
+
+	feed, err := s.db.CreateFeed(context.Background(), database.CreateFeedParams{
+		ID:        id,
+		CreatedAt: created_at,
+		UpdatedAt: updated_at,
+		Name:      cmd.args[0],
+		Url:       cmd.args[1],
+		UserID:    currentUser.ID,
+	})
+	if err != nil {
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+			return fmt.Errorf("url %s already exists", cmd.args[1])
+		}
+		return fmt.Errorf("failed to create feed: %v", err)
+	}
+
+	fmt.Printf("ID: %s\nCreated_at: %s\nUpdated_at: %s\nName: %s\nUrl: %s\nUser_ID: %s", feed.ID, feed.CreatedAt, feed.UpdatedAt, feed.Name, feed.Url, feed.UserID)
+
+	return nil
+}
+
 func main() {
 	cfg, err := config.Read()
 	if err != nil {
@@ -213,6 +247,7 @@ func main() {
 	cmds.register("reset", handlerReset)
 	cmds.register("users", handlerUsers)
 	cmds.register("agg", handlerFetchFeed)
+	cmds.register("addfeed", handlerAddFeed)
 	if len(os.Args) < 2 {
 		log.Fatalf("No command provided")
 	}
