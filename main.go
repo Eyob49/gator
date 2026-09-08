@@ -224,6 +224,23 @@ func handlerAddFeed(s *state, cmd command) error {
 	return nil
 }
 
+func handlerFeeds(s *state, cmd command) error {
+	if len(cmd.args) > 0 {
+		return fmt.Errorf("no extra field needed")
+	}
+
+	feeds, err := s.db.GetFeedsWithUsers(context.Background())
+	if err != nil {
+		return fmt.Errorf("error fetching fields: %v", err)
+	}
+
+	for i := range feeds {
+		fmt.Printf("Feed Name: %s\nURL: %s\nUser: %s\n---\n", feeds[i].Name, feeds[i].Url, feeds[i].UserName)
+	}
+
+	return nil
+}
+
 func main() {
 	cfg, err := config.Read()
 	if err != nil {
@@ -248,6 +265,7 @@ func main() {
 	cmds.register("users", handlerUsers)
 	cmds.register("agg", handlerFetchFeed)
 	cmds.register("addfeed", handlerAddFeed)
+	cmds.register("feeds", handlerFeeds)
 	if len(os.Args) < 2 {
 		log.Fatalf("No command provided")
 	}
