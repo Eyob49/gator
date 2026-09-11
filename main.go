@@ -178,18 +178,6 @@ func handlerUsers(s *state, cmd command) error {
 	return nil
 }
 
-func handlerFetchFeed(s *state, cmd command) error {
-	feed, err := fetchFeed(context.Background(), "https://www.wagslane.dev/index.xml")
-	if err != nil {
-		return fmt.Errorf("failed to fetch feed: %v", err)
-	}
-
-	for _, item := range feed.Channel.Item {
-		fmt.Printf("Title: %s\nLink: %s\nDescription: %s\nPublished: %s\n\n", item.Title, item.Link, item.Description, item.PubDate)
-	}
-	return nil
-}
-
 func handlerAddFeed(s *state, cmd command, user database.User) error {
 	if len(cmd.args) < 2 {
 		return fmt.Errorf("feed name and URL are required")
@@ -339,6 +327,65 @@ func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) 
 	}
 }
 
+func scrapeFeeds(s *state) error {
+	nextFeed, err := s.db.GetNextFeedToFetch(context.Background())
+	if err != nil {
+		if err == sql.ErrNoRows {
+			fmt.Println("No feeds to fetch right now")
+			return nil
+		}
+		return fmt.Errorf("failed to get next feed: %v", err)
+	}
+	err = s.db.MarkFeedFetched(context.Background(), nextFeed.ID)
+	if err != nil {
+		return fmt.Errorf("failed to mark feed fetched: %v", err)
+	}
+	feed, err := fetchFeed(context.Background(), nextFeed.Url)
+	if err != nil {
+		return fmt.Errorf("failed to fetch feed: %v", err)
+	}
+	for i := range feed.Channel.Item {
+		fmt.Printf(" %s\n", feed.Channel.Item[i].Title)
+	}
+	return nil
+}
+
+func newCommands() *commands {
+	cmds := &commands{handlers: make(map[string]func(*state, command) error)}
+	cmds.register("login", handlerLogin)
+	cmds.register("register", handlerRegister)
+	cmds.register("reset", handlerReset)
+	cmds.register("users", handlerUsers)
+	cmds.register("addfeed", middlewareLoggedIn(handlerAddFeed))
+	cmds.register("feeds", handlerFeeds)
+	cmds.register("follow", middlewareLoggedIn(handlerFollow))
+	cmds.register("following", middlewareLoggedIn(handlerFollowing))
+	cmds.register("unfollow", middlewareLoggedIn(handlerUnfollow))
+	cmds.register("agg", handlerAgg)
+	return cmds
+}
+
+func handlerAgg(s *state, cmd command) error {
+	if len(cmd.args) < 1 {
+		return fmt.Errorf("time duration is required")
+	}
+
+	timeBetweenRequests, err := time.ParseDuration(cmd.args[0])
+	if err != nil {
+		return fmt.Errorf("error parsing the time: %v", err)
+	}
+
+	fmt.Printf("Collecting feeds every %v\n", timeBetweenRequests)
+
+	ticker := time.NewTicker(timeBetweenRequests)
+	for ; ; <-ticker.C {
+		err := scrapeFeeds(s)
+		if err != nil {
+			fmt.Printf("Error scraping: %v\n", err)
+		}
+	}
+}
+
 func main() {
 	cfg, err := config.Read()
 	if err != nil {
@@ -356,17 +403,7 @@ func main() {
 		config: cfg,
 	}
 
-	cmds := &commands{handlers: make(map[string]func(*state, command) error)}
-	cmds.register("login", handlerLogin)
-	cmds.register("register", handlerRegister)
-	cmds.register("reset", handlerReset)
-	cmds.register("users", handlerUsers)
-	cmds.register("agg", handlerFetchFeed)
-	cmds.register("addfeed", middlewareLoggedIn(handlerAddFeed))
-	cmds.register("feeds", handlerFeeds)
-	cmds.register("follow", middlewareLoggedIn(handlerFollow))
-	cmds.register("following", middlewareLoggedIn(handlerFollowing))
-	cmds.register("unfollow", middlewareLoggedIn(handlerUnfollow))
+	cmds := newCommands()
 	if len(os.Args) < 2 {
 		log.Fatalf("No command provided")
 	}
