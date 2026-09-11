@@ -293,9 +293,37 @@ func handlerFollowing(s *state, cmd command, user database.User) error {
 		return fmt.Errorf("failed to get user feed follows: %v", err)
 	}
 
+	if len(feedFollowsForUser) == 0 {
+		fmt.Println("You are not following any feeds yet.")
+		return nil
+	}
+
 	for i := range feedFollowsForUser {
 		fmt.Printf("Feed name: %s\n", feedFollowsForUser[i].FeedName)
 	}
+
+	return nil
+}
+
+func handlerUnfollow(s *state, cmd command, user database.User) error {
+	if len(cmd.args) < 1 {
+		return fmt.Errorf("feed URL is required")
+	}
+
+	feedURL, err := s.db.GetFeedByURL(context.Background(), cmd.args[0])
+	if err != nil {
+		return fmt.Errorf("feed not found: %v", err)
+	}
+
+	err = s.db.DeleteFeedFollow(context.Background(), database.DeleteFeedFollowParams{
+		UserID: user.ID,
+		FeedID: feedURL.ID,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete feed follow: %w", err)
+	}
+
+	fmt.Printf("Unfollowed %s\n", feedURL.Name)
 
 	return nil
 }
@@ -338,6 +366,7 @@ func main() {
 	cmds.register("feeds", handlerFeeds)
 	cmds.register("follow", middlewareLoggedIn(handlerFollow))
 	cmds.register("following", middlewareLoggedIn(handlerFollowing))
+	cmds.register("unfollow", middlewareLoggedIn(handlerUnfollow))
 	if len(os.Args) < 2 {
 		log.Fatalf("No command provided")
 	}
