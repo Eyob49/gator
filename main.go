@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -316,6 +317,29 @@ func handlerUnfollow(s *state, cmd command, user database.User) error {
 	return nil
 }
 
+func handlerBrowse(s *state, cmd command, user database.User) error {
+	parsedLimit, err := strconv.Atoi(cmd.args[0])
+	if err != nil {
+		return fmt.Errorf("invalid limit: %v", err)
+	}
+	limit := int32(parsedLimit)
+
+	postsForUser, err := s.db.GetPostsForUser(context.Background(), database.GetPostsForUserParams{
+		UserID: user.ID,
+		Limit:  limit,
+	})
+
+	for i := range postsForUser {
+		fmt.Printf("Title: %s\nURL: %s\nDescription: %s\nPublished: %v\n\n",
+			postsForUser[i].Title,
+			postsForUser[i].Url,
+			postsForUser[i].Description.String,
+			postsForUser[i].PublishedAt.Time)
+	}
+
+	return nil
+}
+
 func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) error) func(*state, command) error {
 	return func(s *state, cmd command) error {
 		currentUser, err := s.db.GetUser(context.Background(), s.config.Username)
@@ -336,17 +360,48 @@ func scrapeFeeds(s *state) error {
 		}
 		return fmt.Errorf("failed to get next feed: %v", err)
 	}
+
+	fmt.Printf("Fetching feed: %s\n", nextFeed.Name)
+
 	err = s.db.MarkFeedFetched(context.Background(), nextFeed.ID)
 	if err != nil {
 		return fmt.Errorf("failed to mark feed fetched: %v", err)
 	}
+
 	feed, err := fetchFeed(context.Background(), nextFeed.Url)
 	if err != nil {
 		return fmt.Errorf("failed to fetch feed: %v", err)
 	}
-	for i := range feed.Channel.Item {
-		fmt.Printf(" %s\n", feed.Channel.Item[i].Title)
+
+	for _, item := range feed.Channel.Item {
+		publishedAt := sql.NullTime{}
+		t, err := time.Parse(time.RFC1123Z, item.PubDate)
+		if err != nil {
+			fmt.Printf("Failed to parse time %s: %v\n", item.PubDate, err)
+		} else {
+			publishedAt = sql.NullTime{Time: t, Valid: true}
+		}
+
+		_, err = s.db.CreatePost(context.Background(), database.CreatePostParams{
+			ID:          uuid.New(),
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+			Title:       item.Title,
+			Url:         item.Link,
+			Description: sql.NullString{String: item.Description, Valid: item.Description != ""},
+			PublishedAt: publishedAt,
+			FeedID:      nextFeed.ID,
+		})
+		if err != nil {
+
+			if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+				continue
+			}
+
+			fmt.Printf("Failed to save post %s: %v\n", item.Title, err)
+		}
 	}
+
 	return nil
 }
 
@@ -362,6 +417,7 @@ func newCommands() *commands {
 	cmds.register("following", middlewareLoggedIn(handlerFollowing))
 	cmds.register("unfollow", middlewareLoggedIn(handlerUnfollow))
 	cmds.register("agg", handlerAgg)
+	cmds.register("browse", middlewareLoggedIn(handlerBrowse))
 	return cmds
 }
 
